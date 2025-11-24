@@ -7,8 +7,9 @@ import dayjs from 'dayjs';
 
 // 1. ดึง Environment Variables ที่จำเป็น
 const SPREADSHEET_ID = process.env.SHEET_ID;
-const SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-const PRIVATE_KEY_RAW = process.env.GOOGLE_PRIVATE_KEY;
+// เปลี่ยนมาใช้ตัวแปร Base64 แทน
+const SERVICE_ACCOUNT_BASE64 = process.env.GOOGLE_SERVICE_ACCOUNT_BASE64;
+
 
 // 2. CORS Headers
 const corsHeaders = {
@@ -26,14 +27,32 @@ export async function OPTIONS() {
 export async function POST(req: Request) {
 
     // ตรวจสอบ Configuration Error ก่อน
-    if (!SPREADSHEET_ID || !SERVICE_ACCOUNT_EMAIL || !PRIVATE_KEY_RAW) {
+    if (!SPREADSHEET_ID || !SERVICE_ACCOUNT_BASE64) {
         return NextResponse.json(
-            { message: 'Configuration Error: Missing required environment variables.' },
+            { message: 'Configuration Error: Missing SHEET_ID or GOOGLE_SERVICE_ACCOUNT_BASE64.' },
             { status: 500, headers: corsHeaders }
         );
     }
 
     try {
+        // JWT Client Setup: ถอดรหัส Base64
+        
+        // ถอดรหัส Base64 กลับเป็น JSON String และ Parse เป็น Object
+        const serviceAccountJson = JSON.parse(
+            Buffer.from(SERVICE_ACCOUNT_BASE64, 'base64').toString('utf8')
+        );
+
+        // ดึงค่า client_email และ private_key จาก Object ที่ถอดรหัสมา
+        const auth = new google.auth.JWT({
+            email: serviceAccountJson.client_email, 
+            key: serviceAccountJson.private_key,
+            scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+        });
+
+        const sheets = google.sheets({ version: 'v4', auth });
+        
+        // ----------------------------------------------------------------------
+        
         const body = await req.json();
         const { user_email, recommended_time_min } = body;
 
@@ -52,17 +71,6 @@ export async function POST(req: Request) {
                 { status: 400, headers: corsHeaders }
             );
         }
-
-        // JWT Client Setup (แก้ไข Type Error)
-        const privateKey = PRIVATE_KEY_RAW.replace(/\\n/g, '\n');
-
-        const auth = new google.auth.JWT({
-            email: SERVICE_ACCOUNT_EMAIL!, // ใช้ ! เพราะตรวจสอบแล้วว่ามีค่า
-            key: privateKey,
-            scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-        });
-
-        const sheets = google.sheets({ version: 'v4', auth });
 
         // Data Preparation
         const log_id = uuidv4();
@@ -95,7 +103,9 @@ export async function POST(req: Request) {
         );
 
     } catch (error) {
-        console.error('Error writing to Google Sheet:', error);
+        console.error('Error processing request or writing to Google Sheet:', error);
+        
+        // หากเกิด Error จากการถอดรหัส Base64 จะถูกจับที่นี่
         return NextResponse.json(
             { message: 'Internal Server Error', error: error instanceof Error ? error.message : 'Unknown error' },
             { status: 500, headers: corsHeaders }
