@@ -29,7 +29,6 @@ export async function OPTIONS() {
 // Main POST handler
 export async function POST(req: Request) {
   try {
-   // Ensure required environment variables exist
     if (!SPREADSHEET_ID || !SERVICE_ACCOUNT_BASE64) {
       return NextResponse.json(
         { message: "Missing SHEET_ID or GOOGLE_SERVICE_ACCOUNT_BASE64" },
@@ -61,7 +60,6 @@ export async function POST(req: Request) {
       );
     }
 
-    
     // STEP 1 — Read the entire sheet
     const readRes = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
@@ -77,8 +75,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // STEP 2 — Find the active task of this user
-    // Active status = "กำลังทำงาน" or "พร้อมส่งมอบรองเท้า"
+    // STEP 2 — Find headers
     const header = rows[0];
     const userEmailIndex = header.indexOf("user_email");
     const finishIndex = header.indexOf("finish_time");
@@ -86,7 +83,7 @@ export async function POST(req: Request) {
 
     const pickupIndex = header.indexOf("pickup_time");
 
-    // Filter only active tasks belonging to the user
+    // Filter active tasks of user
     const activeRows = rows
       .map((row, i) => ({ row, i }))
       .filter(
@@ -99,19 +96,16 @@ export async function POST(req: Request) {
 
     if (activeRows.length === 0) {
       return NextResponse.json(
-        {
-          message:
-            "No active shoe-cleaning task found for this user.",
-        },
+        { message: "No active shoe-cleaning task found for this user." },
         { status: 404, headers: corsHeaders }
       );
     }
 
-    // Get the latest active task (last matching row)
     const latest = activeRows[activeRows.length - 1];
     const targetRowIndex = latest.i + 1;
 
     const finishTime = latest.row[finishIndex];
+    const currentStatus = latest.row[statusIndex];
 
     // STEP 3 — Compare current time with finish_time
     const now = dayjs().tz("Asia/Bangkok").format("YYYY-MM-DD HH:mm:ss");
@@ -120,12 +114,13 @@ export async function POST(req: Request) {
       dayjs(now).isAfter(dayjs(finishTime)) ||
       dayjs(now).isSame(dayjs(finishTime));
 
+    // If not finished, return real status from sheet
     if (!isFinished) {
       return NextResponse.json(
         {
           message: `The shoe-drying process is still running. Please come back after ${finishTime}.`,
           finish_time: finishTime,
-          status: "ยังไม่เสร็จ",
+          status: currentStatus,
         },
         { status: 200, headers: corsHeaders }
       );
@@ -133,22 +128,22 @@ export async function POST(req: Request) {
 
     // STEP 4 — Update pickup_time + status
     const newStatus = "ผู้ใช้รับรองเท้าเรียบร้อย";
-    const pickupTimeNow = now;
 
-    // Update the sheet
+    const pickupTimeISO = dayjs().tz("Asia/Bangkok").format();
+
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
-      range: `J${targetRowIndex}:K${targetRowIndex}`, // pickup_time + status
+      range: `J${targetRowIndex}:K${targetRowIndex}`,
       valueInputOption: "USER_ENTERED",
       requestBody: {
-        values: [[pickupTimeNow, newStatus]],
+        values: [[pickupTimeISO, newStatus]],
       },
     });
 
     return NextResponse.json(
       {
         message: "Pickup recorded successfully.",
-        pickup_time: pickupTimeNow,
+        pickup_time: pickupTimeISO,
         status: newStatus,
       },
       { status: 200, headers: corsHeaders }
