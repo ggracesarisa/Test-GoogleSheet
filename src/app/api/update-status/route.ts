@@ -29,6 +29,7 @@ export async function OPTIONS() {
 
 // Main POST handler
 export async function POST(req: Request) {
+
   // Ensure required environment variables exist
   if (!SPREADSHEET_ID || !SERVICE_ACCOUNT_BASE64 || !CRON_SECRET) {
     return NextResponse.json(
@@ -38,7 +39,6 @@ export async function POST(req: Request) {
   }
 
   try {
-
     // Authenticate request
     const reqSecret = req.headers.get('x-cron-secret');
     if (!reqSecret || reqSecret !== CRON_SECRET) {
@@ -67,25 +67,31 @@ export async function POST(req: Request) {
     const rows = sheetRes.data.values || [];
 
     if (rows.length < 2) {
-      // No data rows
       return NextResponse.json({ message: 'No rows to process.' }, { headers: corsHeaders });
     }
 
     const now = dayjs().tz('Asia/Bangkok');
 
-    // Collect batched updates with their ranges & values
+    // Collect batched updates
     const updates: { range: string; values: string[][] }[] = [];
 
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
+
       // Column mapping (0-based index):
-      const finish_time = row[8]; // column I
-      const currentStatus = row[10]; // column K
+      const finish_time = row[8];     // column I
+      const currentStatus = row[10];  // column K
 
       if (!finish_time) continue;
 
       const finish = dayjs(finish_time).tz('Asia/Bangkok');
 
+      // If status is already "ผู้ใช้รับรองเท้าเรียบร้อย" → DO NOT change it
+      if (currentStatus === 'ผู้ใช้รับรองเท้าเรียบร้อย') {
+        continue;
+      }
+
+      // If finish time passed and status is not yet "พร้อมส่งมอบรองเท้า"
       if (finish.isBefore(now) && currentStatus !== 'พร้อมส่งมอบรองเท้า') {
         const rowNumber = i + 1;
         const statusRange = `K${rowNumber}`;
@@ -93,7 +99,6 @@ export async function POST(req: Request) {
       }
     }
 
-    // If no updates are needed
     if (updates.length === 0) {
       return NextResponse.json(
         { message: 'All rows are up-to-date. No changes made.' },
@@ -111,11 +116,11 @@ export async function POST(req: Request) {
       });
     }
 
-    // Return how many rows were updated
     return NextResponse.json(
       { message: 'Status updated.', updated_count: updates.length },
       { headers: corsHeaders }
     );
+
   } catch (err) {
     console.error('Error in update-status:', err);
     return NextResponse.json(

@@ -6,7 +6,7 @@ import dayjs from "dayjs";
 import timezone from "dayjs/plugin/timezone";
 import utc from "dayjs/plugin/utc";
 
-// Configure dayjs to support timezones
+// Enable timezone support
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
@@ -14,19 +14,19 @@ dayjs.extend(timezone);
 const SPREADSHEET_ID = process.env.SHEET_ID;
 const SERVICE_ACCOUNT_BASE64 = process.env.GOOGLE_SERVICE_ACCOUNT_BASE64;
 
-// CORS configuration
+// CORS setup
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
-// Handle preflight CORS requests
+// Handle OPTIONS
 export async function OPTIONS() {
   return NextResponse.json({}, { headers: corsHeaders });
 }
 
-// Main POST handler
+// POST handler
 export async function POST(req: Request) {
   try {
     if (!SPREADSHEET_ID || !SERVICE_ACCOUNT_BASE64) {
@@ -49,7 +49,7 @@ export async function POST(req: Request) {
 
     const sheets = google.sheets({ version: "v4", auth });
 
-    // Read request body
+    // Read request JSON
     const body = await req.json();
     const { user_email } = body;
 
@@ -60,7 +60,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // STEP 1 — Read the entire sheet
+    // Read sheet data
     const readRes = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: "A:K",
@@ -75,15 +75,14 @@ export async function POST(req: Request) {
       );
     }
 
-    // STEP 2 — Find headers
+    // Extract column indexes
     const header = rows[0];
     const userEmailIndex = header.indexOf("user_email");
     const finishIndex = header.indexOf("finish_time");
     const statusIndex = header.indexOf("status");
-
     const pickupIndex = header.indexOf("pickup_time");
 
-    // Filter active tasks of user
+    // Filter only active tasks
     const activeRows = rows
       .map((row, i) => ({ row, i }))
       .filter(
@@ -101,49 +100,49 @@ export async function POST(req: Request) {
       );
     }
 
+    // Select the latest task
     const latest = activeRows[activeRows.length - 1];
     const targetRowIndex = latest.i + 1;
 
     const finishTime = latest.row[finishIndex];
-    const currentStatus = latest.row[statusIndex];
+    const statusNow = latest.row[statusIndex];
 
-    // STEP 3 — Compare current time with finish_time
-    const now = dayjs().tz("Asia/Bangkok").format("YYYY-MM-DD HH:mm:ss");
+    // Use ISO8601 parsing
+    const finishTimeParsed = dayjs(finishTime);
+    const now = dayjs().tz("Asia/Bangkok");
 
     const isFinished =
-      dayjs(now).isAfter(dayjs(finishTime)) ||
-      dayjs(now).isSame(dayjs(finishTime));
+      now.isAfter(finishTimeParsed) || now.isSame(finishTimeParsed);
 
-    // If not finished, return real status from sheet
+    // If still not finished → return status real value
     if (!isFinished) {
       return NextResponse.json(
         {
           message: `The shoe-drying process is still running. Please come back after ${finishTime}.`,
           finish_time: finishTime,
-          status: currentStatus,
+          status: statusNow, // the real status from sheet
         },
         { status: 200, headers: corsHeaders }
       );
     }
 
-    // STEP 4 — Update pickup_time + status
+    // If finished → set pickup time + update status
     const newStatus = "ผู้ใช้รับรองเท้าเรียบร้อย";
-
-    const pickupTimeISO = dayjs().tz("Asia/Bangkok").format();
+    const pickupTimeNow = now.format("YYYY-MM-DDTHH:mm:ssZ"); // ISO8601 + timezone
 
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
-      range: `J${targetRowIndex}:K${targetRowIndex}`,
+      range: `J${targetRowIndex}:K${targetRowIndex}`, // pickup_time + status
       valueInputOption: "USER_ENTERED",
       requestBody: {
-        values: [[pickupTimeISO, newStatus]],
+        values: [[pickupTimeNow, newStatus]],
       },
     });
 
     return NextResponse.json(
       {
         message: "Pickup recorded successfully.",
-        pickup_time: pickupTimeISO,
+        pickup_time: pickupTimeNow,
         status: newStatus,
       },
       { status: 200, headers: corsHeaders }
@@ -151,10 +150,7 @@ export async function POST(req: Request) {
   } catch (err: any) {
     console.error("Error in pickup API:", err);
     return NextResponse.json(
-      {
-        message: "Internal Server Error",
-        error: err.message,
-      },
+      { message: "Internal Server Error", error: err.message },
       { status: 500, headers: corsHeaders }
     );
   }
