@@ -1,22 +1,22 @@
+// src/app/api/sending-email/route.ts
 import { Resend } from "resend";
 import { NextResponse } from "next/server";
 
-// --- Init Resend ---
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// --- CORS Settings ---
+// CORS configuration
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
-// --- Handle OPTIONS (CORS Preflight) ---
+// Handle preflight CORS requests
 export function OPTIONS() {
   return NextResponse.json({}, { status: 200, headers: corsHeaders });
 }
 
-// --- POST Method ---
+// Main POST handler
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -29,9 +29,9 @@ export async function POST(req: Request) {
       );
     }
 
-    // ---- Send Email ----
+    // Send Email
     const data = await resend.emails.send({
-      from: "Smart Shoe Locker <no-reply@smartshoe.app>",
+      from: "onboarding@resend.dev", // Defualt resend email
       to: user_email,
       subject: "Your shoes are almost ready 👟",
       html: `
