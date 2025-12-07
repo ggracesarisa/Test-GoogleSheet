@@ -1,58 +1,63 @@
+import { Resend } from "resend";
 import { NextResponse } from "next/server";
-import nodemailer from "nodemailer";
 
+// --- Init Resend ---
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+// --- CORS Settings ---
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+// --- Handle OPTIONS (CORS Preflight) ---
+export function OPTIONS() {
+  return NextResponse.json({}, { status: 200, headers: corsHeaders });
+}
+
+// --- POST Method ---
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { user_email, percent, message } = body;
+    const { user_email, percent } = body;
 
     if (!user_email) {
       return NextResponse.json(
         { error: "user_email is required" },
-        { status: 400 }
+        { status: 400, headers: corsHeaders }
       );
     }
 
-    // Create transporter
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: "t56014223@gmail.com", 
-        pass: "wbsl befq bndm rhvk",
-      },
-    });
-
-    const mailOptions = {
-      from: `"Smart Shoe Locker 👟" <t56014223@gmail.com>`,
+    // ---- Send Email ----
+    const data = await resend.emails.send({
+      from: "Smart Shoe Locker <no-reply@smartshoe.app>",
       to: user_email,
-      subject: "Your shoes are almost ready 👀",
+      subject: "Your shoes are almost ready 👟",
       html: `
-        <div style="font-family: Arial, sans-serif;">
+        <div style="font-family: Arial, sans-serif; padding: 12px;">
           <h2>Your shoes are almost ready!</h2>
-          <p>The cleaning process is <b>${percent || 95}% complete</b>.</p>
-          <p>You can prepare to pick them up soon 🚪👟</p>
+          <p>The cleaning process is <b>${percent || 95}%</b> complete.</p>
+          <p>You can prepare to pick them up soon </p>
           <br>
-          <p style="color: #777; font-size: 12px;">
+          <p style="font-size: 12px; color: #777;">
             Smart Shoe Locker System
           </p>
         </div>
       `,
-    };
-
-    await transporter.sendMail(mailOptions);
-
-    return NextResponse.json({
-      success: true,
-      message: "Email sent successfully",
     });
-  } catch (err: any) {
-    console.error("Email error:", err);
+
     return NextResponse.json(
-      {
-        error: "Failed to send email",
-        details: err.message,
-      },
-      { status: 500 }
+      { success: true, data },
+      { status: 200, headers: corsHeaders }
+    );
+
+  } catch (error: any) {
+    console.error("Email sending error:", error);
+
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500, headers: corsHeaders }
     );
   }
 }
